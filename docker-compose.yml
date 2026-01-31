@@ -1,0 +1,104 @@
+services:
+  # MariaDB Database
+  mariadb:
+    image: mariadb:11
+    container_name: todo-mariadb
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-rootpassword}
+      MYSQL_DATABASE: ${DB_NAME:-todo_db}
+      MYSQL_USER: ${DB_USERNAME:-todouser}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-todopassword}
+    volumes:
+      - mariadb_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    # Resource limits for 1GB RAM / 1 CPU VPS
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.3'
+        reservations:
+          memory: 128M
+
+  # Spring Boot Backend
+  backend:
+    image: hoidanitreal/m05-fullstack-java-spring-only
+    container_name: todo-backend
+    environment:
+      DB_HOST: mariadb
+      DB_PORT: 3306
+      DB_NAME: ${DB_NAME:-todo_db}
+      DB_USERNAME: ${DB_USERNAME:-todouser}
+      DB_PASSWORD: ${DB_PASSWORD:-todopassword}
+      JWT_SECRET: ${JWT_SECRET:-hoidanit-deploy-sieu-toc-secret-key-minimum-256-bits-for-hs256-algorithm-security}
+      JWT_ISSUER: ${JWT_ISSUER:-hoidanit}
+      JWT_EXPIRATION: ${JWT_EXPIRATION:-86400000}
+      SERVER_PORT: 8080
+      # JVM memory settings for low RAM
+      JAVA_OPTS: "-Xms128m -Xmx384m -XX:+UseG1GC -XX:MaxGCPauseMillis=100"
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    # Resource limits for 1GB RAM / 1 CPU VPS
+    deploy:
+      resources:
+        limits:
+          memory: 400M
+          cpus: '0.5'
+        reservations:
+          memory: 256M
+
+  # Angular Frontend (Static files served by Caddy)
+  frontend:
+    image: hoidanitreal/m05-fullstack-angular-only
+    container_name: todo-frontend
+    depends_on:
+      - backend
+    # Resource limits for 1GB RAM / 1 CPU VPS
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+          cpus: '0.1'
+        reservations:
+          memory: 32M
+
+  # Caddy Reverse Proxy (Main entry point)
+  caddy:
+    image: caddy:2-alpine
+    container_name: todo-caddy
+    ports:
+      - "${APP_PORT:-80}:80"
+      - "${APP_HTTPS_PORT:-443}:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - frontend
+      - backend
+    # Resource limits for 1GB RAM / 1 CPU VPS
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: '0.1'
+        reservations:
+          memory: 64M
+
+volumes:
+  mariadb_data:
+  caddy_data:
+  caddy_config:
+
+
+# docker compose -p hoidanit-spring-angular-mariadb up -d
